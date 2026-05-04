@@ -1,4 +1,4 @@
-import { UPGRADE_CONFIGS, upgradeCost, WEAPON_MULTIPLIERS } from '../data/UpgradeConfigs.js';
+import { UPGRADE_CONFIGS, upgradeCost } from '../data/UpgradeConfigs.js';
 import { SaveManager } from '../utils/SaveManager.js';
 
 export class UpgradeSystem {
@@ -39,13 +39,6 @@ export class UpgradeSystem {
     if (!SaveManager.spendFragments(cost)) return false;
     SaveManager.setUpgradeLevel(key, this.getLevel(key) + 1);
     return true;
-  }
-
-  /** Total fragment count per hit (base × weapon multiplier) */
-  getFragmentsPerHit() {
-    const base = this.get('fragmentCount');
-    const tier = this.get('weapon');
-    return Math.floor(base * WEAPON_MULTIPLIERS[tier]);
   }
 
   get configs() { return UPGRADE_CONFIGS; }

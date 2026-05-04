@@ -1,10 +1,10 @@
 import { SaveManager }   from '../utils/SaveManager.js';
 import { fmt }           from '../utils/FormatNumber.js';
 import { UpgradeSystem } from '../systems/UpgradeSystem.js';
-import { WEAPON_NAMES, upgradeCost } from '../data/UpgradeConfigs.js';
+import { upgradeCost } from '../data/UpgradeConfigs.js';
 import {
   GAME_WIDTH, GAME_HEIGHT,
-  COLOR_UI_BG, COLOR_BTN, COLOR_BTN_TEXT,
+  COLOR_BTN,
 } from '../constants.js';
 
 const CARD_W     = 170;
@@ -132,8 +132,7 @@ export class UpgradeScene extends Phaser.Scene {
     // Level text
     const maxStr = cfg.maxLevel != null ? `/${cfg.maxLevel}` : '';
     let statVal  = this.upgrades.get(cfg.key);
-    if (cfg.key === 'weapon') statVal = WEAPON_NAMES[lvl] ?? WEAPON_NAMES[0];
-    else if (cfg.key === 'dogMagnet') statVal = lvl > 0 ? '已激活' : '未激活';
+    if (cfg.key === 'dogMagnet') statVal = lvl > 0 ? '已激活' : '未激活';
     card.levelText.setText(`等级 ${lvl}${maxStr}  当前：${statVal}`);
 
     // Button

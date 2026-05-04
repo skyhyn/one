@@ -1,128 +1,131 @@
-import { COLOR_DOG } from '../constants.js';
+import { COLOR_DOG, SMALL_STONE_RADIUS } from '../constants.js';
+import { SaveManager } from '../utils/SaveManager.js';
 
-const BODY_R = 10;
-const ARRIVE_DIST = 20; // px — stop moving when this close to target
+const COLLECT_DIST = SMALL_STONE_RADIUS + 14;
+const ARRIVE_DIST  = 18;
+const BODY_R       = 10;
 
 export class Dog {
   /**
    * @param {Phaser.Scene}    scene
    * @param {Player}          player
    * @param {UpgradeSystem}   upgrades
-   * @param {FragmentSystem}  fragmentSystem
+   * @param {(n:number)=>void} onCollect
    */
-  constructor(scene, player, upgrades, fragmentSystem) {
-    this.scene          = scene;
-    this.player         = player;
-    this.upgrades       = upgrades;
-    this.fragmentSystem = fragmentSystem;
+  constructor(scene, player, upgrades, onCollect) {
+    this.scene     = scene;
+    this.player    = player;
+    this.upgrades  = upgrades;
+    this.onCollect = onCollect;
 
-    if (!scene.textures.exists('dog')) {
-      _buildDogTexture(scene);
-    }
+    if (!scene.textures.exists('dog2')) _buildTexture(scene);
 
     this.sprite = scene.physics.add.image(
-      player.x + 30,
-      player.y + 20,
-      'dog'
+      player.x + 35, player.y, 'dog2'
     );
     this.sprite.setCollideWorldBounds(true);
+    this.sprite.body.allowGravity = false;
   }
 
   get body() { return this.sprite; }
+  get x()    { return this.sprite.x; }
+  get y()    { return this.sprite.y; }
 
-  update() {
+  /**
+   * @param {SmallStone[]} smallStones  live list from GameScene
+   */
+  update(smallStones) {
     const speed  = this.upgrades.get('dogSpeed');
     const radius = this.upgrades.get('dogRadius');
     const magnet = this.upgrades.get('dogMagnet');
 
-    // Magnet ability: pull nearby fragments toward dog
+    // Magnet: pull nearby small stones toward dog
     if (magnet) {
-      this._magnetPull(radius * 1.5);
+      for (const s of smallStones) {
+        if (!s.alive) continue;
+        const d = _dist(this, s);
+        if (d < radius * 1.5 && d > 5) {
+          const angle = Math.atan2(this.y - s.y, this.x - s.x);
+          s.x += Math.cos(angle) * 10;
+          s.y += Math.sin(angle) * 10;
+        }
+      }
     }
 
-    const target = this._findTarget(radius);
-    scene_moveTo(this.scene, this.sprite, target, speed);
+    // Find nearest small stone within radius
+    let nearest = null, nearDist = radius;
+    for (const s of smallStones) {
+      if (!s.alive) continue;
+      const d = _dist(this, s);
+      if (d < nearDist) { nearDist = d; nearest = s; }
+    }
 
-    // Flip sprite to face direction of travel
+    // Move toward nearest stone, or follow player
+    const target = nearest ?? { x: this.player.x, y: this.player.y };
+    _moveToward(this.sprite, target, speed);
+
+    // Face movement direction
     const vx = this.sprite.body.velocity.x;
-    if (Math.abs(vx) > 10) this.sprite.setFlipX(vx < 0);
-  }
+    if (Math.abs(vx) > 15) this.sprite.setFlipX(vx < 0);
 
-  _findTarget(radius) {
-    // Look for nearest fragment within radius
-    const frags = this.fragmentSystem.activeFragments;
-    let nearest = null;
-    let nearDist = radius;
-
-    for (const f of frags) {
-      const d = Phaser.Math.Distance.Between(this.sprite.x, this.sprite.y, f.x, f.y);
-      if (d < nearDist) { nearDist = d; nearest = f; }
-    }
-
-    return nearest ?? this.player.sprite;
-  }
-
-  _magnetPull(radius) {
-    const frags = this.fragmentSystem.activeFragments;
-    for (const f of frags) {
-      const d = Phaser.Math.Distance.Between(this.sprite.x, this.sprite.y, f.x, f.y);
-      if (d < radius && d > 5) {
-        const angle = Phaser.Math.Angle.Between(f.x, f.y, this.sprite.x, this.sprite.y);
-        f.x += Math.cos(angle) * 8;
-        f.y += Math.sin(angle) * 8;
-        if (f.body) f.body.reset(f.x, f.y);
+    // Collect stones that are close enough
+    for (const s of smallStones) {
+      if (!s.alive) continue;
+      if (_dist(this, s) < COLLECT_DIST) {
+        s.destroy();
+        SaveManager.addFragments(1);
+        if (this.onCollect) this.onCollect(1);
       }
     }
   }
 
-  get x() { return this.sprite.x; }
-  get y() { return this.sprite.y; }
-
   destroy() { this.sprite.destroy(); }
 }
 
-function scene_moveTo(scene, sprite, target, speed) {
-  const dx = target.x - sprite.x;
-  const dy = target.y - sprite.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist < ARRIVE_DIST) {
-    sprite.setVelocity(0);
-    return;
-  }
-  sprite.setVelocity((dx / dist) * speed, (dy / dist) * speed);
+function _dist(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
-function _buildDogTexture(scene) {
+function _moveToward(sprite, target, speed) {
+  const dx = target.x - sprite.x;
+  const dy = target.y - sprite.y;
+  const d  = Math.sqrt(dx * dx + dy * dy);
+  if (d < ARRIVE_DIST) { sprite.setVelocity(0, 0); return; }
+  sprite.setVelocity((dx / d) * speed, (dy / d) * speed);
+}
+
+function _buildTexture(scene) {
   const r = BODY_R;
   const g = scene.make.graphics({ add: false });
 
-  // Body
+  // Body (oval)
   g.fillStyle(COLOR_DOG);
-  g.fillEllipse(r, r + 2, r * 1.8, r * 1.4);
+  g.fillEllipse(r, r + 3, r * 1.9, r * 1.4);
 
   // Head
-  g.fillCircle(r * 1.6, r - 2, r * 0.8);
+  g.fillStyle(COLOR_DOG);
+  g.fillCircle(r * 1.65, r - 1, r * 0.85);
 
   // Ears
   g.fillStyle(0xb87830);
-  g.fillEllipse(r * 1.4, r - 8, 8, 10);
-  g.fillEllipse(r * 2.1, r - 8, 8, 10);
+  g.fillEllipse(r * 1.35, r - 9, 9, 12);
+  g.fillEllipse(r * 2.1,  r - 9, 9, 12);
 
   // Eye
   g.fillStyle(0x333333);
-  g.fillCircle(r * 1.8, r - 3, 2);
+  g.fillCircle(r * 1.85, r - 2, 2.5);
 
   // Nose
   g.fillStyle(0x333333);
-  g.fillCircle(r * 2.1, r, 2);
+  g.fillCircle(r * 2.15, r + 2, 2);
 
-  // Tail (wagging arc)
+  // Tail
   g.lineStyle(3, 0xb87830, 1);
   g.beginPath();
-  g.arc(r * 0.2, r, 10, -0.5, 0.8);
+  g.arc(r * 0.15, r + 2, 11, -0.6, 0.7);
   g.strokePath();
 
-  g.generateTexture('dog', r * 3, r * 2 + 4);
+  g.generateTexture('dog2', r * 3, r * 2 + 6);
   g.destroy();
 }

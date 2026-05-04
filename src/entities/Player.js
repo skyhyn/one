@@ -1,117 +1,105 @@
 import {
-  PLAYER_START_X, PLAYER_START_Y,
-  PLAYER_BASE_SPEED,
-  COLOR_PLAYER,
-  STONE_X, STONE_Y,
-  GAME_WIDTH, GAME_HEIGHT,
+  PLAYER_START_X, PLAYER_Y,
+  COLOR_PLAYER, GAME_WIDTH,
 } from '../constants.js';
 
-const BODY_R  = 14;
-const THROW_DURATION = 200;
+const BODY_R = 15;
 
 export class Player {
   /**
-   * @param {Phaser.Scene}   scene
-   * @param {UpgradeSystem}  upgrades
+   * @param {Phaser.Scene}  scene
+   * @param {UpgradeSystem} upgrades
    */
   constructor(scene, upgrades) {
     this.scene    = scene;
     this.upgrades = upgrades;
-    this._facing  = 1; // 1=right, -1=left
+    this._lastThrow = -99999;
 
-    // Build texture once
-    if (!scene.textures.exists('player')) {
-      _buildPlayerTexture(scene);
-    }
+    if (!scene.textures.exists('player2')) _buildTexture(scene);
 
-    this.sprite = scene.physics.add.image(PLAYER_START_X, PLAYER_START_Y, 'player');
+    this.sprite = scene.physics.add.image(PLAYER_START_X, PLAYER_Y, 'player2');
     this.sprite.setCollideWorldBounds(true);
-
-    // Visual for thrown projectile
-    this._projectileGfx = null;
+    this.sprite.body.allowGravity = false;
   }
 
-  get body() { return this.sprite; }
+  get body()  { return this.sprite; }
+  get x()     { return this.sprite.x; }
+  get y()     { return this.sprite.y; }
 
-  /** Called every frame from GameScene.update */
-  update(cursors, wasd) {
+  /** Called every frame. keys = { left, right, a, d } (Phaser Key objects). */
+  update(keys) {
     const speed = this.upgrades.get('playerSpeed');
-    const vx = _axis(cursors.left.isDown || wasd.left.isDown,
-                     cursors.right.isDown || wasd.right.isDown);
-    const vy = _axis(cursors.up.isDown   || wasd.up.isDown,
-                     cursors.down.isDown  || wasd.down.isDown);
+    let vx = 0;
+    if (keys.left.isDown || keys.a.isDown)  vx = -speed;
+    if (keys.right.isDown || keys.d.isDown) vx =  speed;
 
-    this.sprite.setVelocity(vx * speed, vy * speed);
+    this.sprite.setVelocityX(vx);
+    this.sprite.setVelocityY(0);
 
-    if (vx !== 0) {
-      this._facing = vx > 0 ? 1 : -1;
-      this.sprite.setFlipX(this._facing < 0);
-    }
+    if (vx < 0) this.sprite.setFlipX(true);
+    else if (vx > 0) this.sprite.setFlipX(false);
   }
 
-  /** Called by AttackSystem on each attack tick */
-  playThrowAnim(weaponTier) {
-    // Quick scale-pulse
+  canThrow() {
+    const cd = this.upgrades.get('throwCooldown');
+    return (this.scene.time.now - this._lastThrow) >= cd;
+  }
+
+  /**
+   * Returns an array of {vx, vy, bouncesLeft} ball descriptors, or null if on cooldown.
+   * @param {number} mx  mouse world X
+   * @param {number} my  mouse world Y
+   */
+  buildThrow(mx, my) {
+    if (!this.canThrow()) return null;
+    this._lastThrow = this.scene.time.now;
+
+    const dx = mx - this.x;
+    let   dy = my - this.y;
+    // Force upward — prevent shooting downward
+    if (dy > -30) dy = -30;
+
+    const len   = Math.sqrt(dx * dx + dy * dy);
+    const nx    = dx / len;
+    const ny    = dy / len;
+    const speed = this.upgrades.get('ballSpeed');
+    const bounces = this.upgrades.get('ballBounces');
+    const count   = this.upgrades.get('ballCount');
+
+    // Throw animation
     this.scene.tweens.add({
-      targets:  this.sprite,
-      scaleX:   1.25,
-      scaleY:   0.85,
-      duration: 80,
-      yoyo:     true,
-      ease:     'Quad.InOut',
+      targets: this.sprite,
+      scaleY: 1.25, scaleX: 0.8,
+      duration: 70, yoyo: true,
     });
 
-    // Spawn a projectile that flies to the stone
-    this._spawnProjectile(weaponTier);
-  }
-
-  _spawnProjectile(weaponTier) {
-    const colors  = [0xaaaaaa, 0x888888, 0x555555, 0xff4400];
-    const sizes   = [5, 5, 7, 8];
-    const color   = colors[Math.min(weaponTier, colors.length - 1)];
-    const size    = sizes[Math.min(weaponTier, sizes.length - 1)];
-
-    const g = this.scene.add.graphics();
-    g.fillStyle(color, 1);
-    g.fillCircle(0, 0, size);
-    g.x = this.sprite.x;
-    g.y = this.sprite.y;
-
-    // Add trail effect for higher tiers
-    if (weaponTier >= 2) {
-      g.lineStyle(2, 0xffcc44, 0.6);
-      g.strokeCircle(0, 0, size + 3);
+    const balls = [];
+    for (let i = 0; i < count; i++) {
+      // Spread angle for multi-ball (±12° total)
+      const spread = count > 1 ? ((i / (count - 1)) - 0.5) * 0.42 : 0;
+      const cos    = Math.cos(spread);
+      const sin    = Math.sin(spread);
+      balls.push({
+        vx: (nx * cos - ny * sin) * speed,
+        vy: (nx * sin + ny * cos) * speed,
+        bouncesLeft: bounces,
+      });
     }
-
-    this.scene.tweens.add({
-      targets:  g,
-      x:        STONE_X,
-      y:        STONE_Y,
-      duration: THROW_DURATION,
-      ease:     'Quad.In',
-      onComplete: () => g.destroy(),
-    });
+    return balls;
   }
-
-  get x() { return this.sprite.x; }
-  get y() { return this.sprite.y; }
 
   destroy() { this.sprite.destroy(); }
 }
 
-function _axis(neg, pos) {
-  return pos ? 1 : neg ? -1 : 0;
-}
-
-function _buildPlayerTexture(scene) {
+function _buildTexture(scene) {
   const r = BODY_R;
   const g = scene.make.graphics({ add: false });
 
-  // Shadow (kept within texture bounds)
+  // Shadow
   g.fillStyle(0x000000, 0.2);
-  g.fillEllipse(r, r * 2, r * 1.6, 6);
+  g.fillEllipse(r, r * 2 + 2, r * 1.7, 7);
 
-  // Body (rice ball shape — rounded)
+  // Body
   g.fillStyle(COLOR_PLAYER);
   g.fillCircle(r, r, r);
 
@@ -120,15 +108,21 @@ function _buildPlayerTexture(scene) {
   g.fillCircle(r - 5, r - 2, 3);
   g.fillCircle(r + 5, r - 2, 3);
 
-  // Mouth
+  // Smile
   g.fillStyle(0x333333);
-  g.fillRect(r - 3, r + 4, 6, 2);
+  g.fillRect(r - 4, r + 4, 8, 2);
+  g.fillRect(r - 5, r + 3, 2, 2);
+  g.fillRect(r + 3,  r + 3, 2, 2);
 
   // Rosy cheeks
-  g.fillStyle(0xff9999, 0.6);
-  g.fillCircle(r - 9, r + 1, 4);
-  g.fillCircle(r + 9, r + 1, 4);
+  g.fillStyle(0xff9999, 0.55);
+  g.fillCircle(r - 10, r,     4);
+  g.fillCircle(r + 10, r,     4);
 
-  g.generateTexture('player', r * 2, r * 2 + 4);
+  // Headband (tiny stripe)
+  g.fillStyle(0xff6655, 0.75);
+  g.fillRect(r - r, r - r + 3, r * 2, 3);
+
+  g.generateTexture('player2', r * 2, r * 2 + 4);
   g.destroy();
 }
